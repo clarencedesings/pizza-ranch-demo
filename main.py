@@ -24,8 +24,23 @@ def save_leads(leads: list[dict]):
     with open(LEADS_FILE, "w") as f:
         json.dump(leads, f, indent=2)
 
+SPECIALS_FILE = "/home/clarence/pizza-ranch-manager/data/specials.json"
+
 OLLAMA_URL = "http://localhost:11434/api/chat"
 MODEL = "llama3.2:3b"
+
+
+def get_todays_special() -> dict | None:
+    if not os.path.exists(SPECIALS_FILE):
+        return None
+    try:
+        with open(SPECIALS_FILE) as f:
+            specials = json.load(f)
+        today = datetime.now().date().isoformat()
+        matches = [s for s in specials if s.get("date") == today]
+        return matches[-1] if matches else None
+    except Exception:
+        return None
 
 SYSTEM_PROMPT = (
     "You are Ranger, a friendly and enthusiastic virtual assistant for Pizza Ranch "
@@ -472,7 +487,21 @@ class LeadRequest(BaseModel):
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    return HTML_PAGE
+    special = get_todays_special()
+    page = HTML_PAGE
+    if special:
+        greeting = (
+            f"Howdy! I'm Ranger, your virtual assistant at Pizza Ranch FunZone in McPherson! "
+            f"Today's special is **{special['name']}** — {special['description']}! "
+            f"What can I help you with?"
+        )
+        page = page.replace(
+            "Howdy! I'm Ranger, your virtual assistant at Pizza Ranch FunZone in McPherson! "
+            "Whether you need info on our buffet, arcade tokens, or party rooms, I'm here to help. "
+            "What can I do for you today?",
+            greeting,
+        )
+    return page
 
 
 def clean_response(text: str) -> str:
@@ -493,7 +522,11 @@ def has_factual_answer(text: str) -> bool:
         "60 guests", "620", "206 n main",
         "pizza buffet", "chicken", "salad bar", "dessert pizza",
         "game card",
+        "today's special", "today's featured", "special is", "featured pizza",
     ]
+    special = get_todays_special()
+    if special:
+        indicators.append(special["name"].lower())
     return any(i.lower() in text.lower() for i in indicators)
 
 
@@ -507,7 +540,11 @@ CONTACT_PROMPT = (
 @app.post("/chat")
 async def chat(req: ChatRequest):
     history = req.history[-6:] if len(req.history) > 6 else req.history
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    prompt = SYSTEM_PROMPT
+    special = get_todays_special()
+    if special:
+        prompt += f"\n- Today's featured pizza special: {special['name']} - {special['description']}"
+    messages = [{"role": "system", "content": prompt}]
     for msg in history:
         messages.append({"role": msg["role"], "content": msg["content"]})
     messages.append({"role": "user", "content": req.message})
